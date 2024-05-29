@@ -15,7 +15,10 @@ use ::core::{
 use hex::FromHex;
 use http::uri::{Authority, InvalidUri};
 use iri_string::types::UriString;
-use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+use k256::{
+    ecdsa::{RecoveryId, Signature, VerifyingKey},
+    elliptic_curve::sec1::EncodedPoint,
+};
 use sha3::{Digest, Keccak256};
 use std::convert::{TryFrom, TryInto};
 use thiserror::Error;
@@ -364,12 +367,12 @@ impl Default for VerificationOpts {
 #[derive(Error, Debug)]
 /// Reasons for the verification of a signed message to fail.
 pub enum VerificationError {
-    #[error(transparent)]
+    #[error("Signature is not valid")]
     /// Signature is not a valid k256 signature (it can be returned if the contract wallet verification failed or is not enabled).
-    Crypto(#[from] k256::ecdsa::Error),
-    #[error(transparent)]
+    Crypto,
+    #[error("Message failed to be serialized")]
     /// Message failed to be serialized.
-    Serialization(#[from] fmt::Error),
+    Serialization,
     #[error("Recovered key does not match address or contract wallet support is not enabled.")]
     /// Catch-all for invalid signature (it can be returned if contract wallet support is not enabled).
     Signer,
@@ -430,12 +433,24 @@ impl Message {
     /// let signer: Vec<u8> = message.verify_eip191(&signature).unwrap();
     /// ```
     pub fn verify_eip191(&self, sig: &[u8; 65]) -> Result<Vec<u8>, VerificationError> {
-        let prehash = self.eip191_hash()?;
-        let signature: Signature = Signature::from_slice(&sig[..64])?;
-        let recovery_id = RecoveryId::try_from(&sig[64] % 27)?;
+        let prehash = match self.eip191_hash() {
+            Ok(prehash) => prehash,
+            Err(e) => return Err(VerificationError::Serialization),
+        };
+        let signature: Signature = match Signature::from_slice(&sig[..64]) {
+            Ok(signature) => signature,
+            Err(e) => return Err(VerificationError::Crypto),
+        };
+        let recovery_id = match RecoveryId::try_from(&sig[64] % 27) {
+            Ok(recovery_id) => recovery_id,
+            Err(e) => return Err(VerificationError::Crypto),
+        };
 
         let pk: VerifyingKey =
-            VerifyingKey::recover_from_prehash(&prehash, &signature, recovery_id)?;
+            match VerifyingKey::recover_from_prehash(&prehash, &signature, recovery_id) {
+                Ok(pk) => pk,
+                Err(e) => return Err(VerificationError::Crypto),
+            };
 
         let recovered_address = Keccak256::default()
             .chain_update(&pk.to_encoded_point(false).as_bytes()[1..])
@@ -446,7 +461,7 @@ impl Message {
         if recovered_address != self.address {
             Err(VerificationError::Signer)
         } else {
-            Ok(pk.to_sec1_bytes().to_vec())
+            Ok(pk.to_encoded_point(true).as_bytes().to_vec())
         }
     }
 
