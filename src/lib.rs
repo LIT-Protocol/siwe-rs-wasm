@@ -2,7 +2,6 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg), feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
-mod nonce;
 mod rfc3339;
 
 #[cfg(feature = "ethers")]
@@ -31,7 +30,6 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
 };
 
-pub use nonce::generate_nonce;
 pub use rfc3339::TimeStamp;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
